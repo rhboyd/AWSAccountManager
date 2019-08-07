@@ -1,5 +1,7 @@
 # AWS
 
+_If we keep ignoring usability bugs, the customers will fix them themselves. Ideally with Lambda._ --AWS, presumably 
+
 This is an AWS Accounts Email Organizer. It will help users of AWS Organizations to keep track of which email addresses are tied to which accounts.
 
 Here's how it works.
