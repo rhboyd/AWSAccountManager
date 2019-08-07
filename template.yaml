@@ -1,0 +1,166 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  AWS
+
+  Sample SAM Template for AWS
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Parameters:
+  MyHostedZone:
+    Type: String
+    Description: HostedZone ID for the Domain's Public Hosted Zone in Route53
+  Domain:
+    Type: String
+    Description: Domain Name to use for the MX Record
+  DefaultEmail:
+    Type: String
+    Description: Email to use as a Default in the event that the Table wasn't updated
+
+
+Resources:
+  SESVerifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ses_verify/
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Timeout: 300
+      Policies:
+        - Statement:
+            - Action:
+                - route53:GetHostedZone
+                - route53:ChangeResourceRecordSets
+              Effect: "Allow"
+              Resource: !Sub "arn:aws:route53:::hostedzone/${MyHostedZone}"
+        - Statement:
+            - Action:
+                - ses:VerifyDomainDkim
+                - ses:VerifyDomainIdentity
+                - ses:SetActiveReceiptRuleSet
+              Effect: "Allow"
+              Resource: "*"
+
+  SesVerificationRecords:
+    Type: Custom::AmazonSesVerificationRecords
+    Properties:
+      ServiceToken: !GetAtt SESVerifierFunction.Arn
+      HostedZoneId: !Ref MyHostedZone
+      RuleSetName: !Ref RuleSet
+
+  HelloWorldFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: hello_world/
+      Handler: app.lambda_handler
+      Runtime: python3.7
+      Timeout: 300
+      Policies:
+        - Statement:
+            - Action:
+                - "s3:GetObject"
+              Effect: "Allow"
+              Resource: !Sub "arn:aws:s3:::inbound-email-${AWS::AccountId}-${AWS::Region}/inbound_email/*"
+        - Statement:
+            - Action:
+                - "ses:SendEmail"
+              Effect: "Allow"
+              Resource: "*"
+        - Statement:
+            - Action:
+                - "organizations:ListAccounts"
+              Effect: "Allow"
+              Resource: "*"
+        - Statement:
+            - Action:
+                - "dynamodb:GetItem"
+                - "dynamodb:PutItem"
+              Effect: "Allow"
+              Resource: !GetAtt EmailToAccountId.Arn
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref EmailToAccountId
+          DEFAULT_EMAIL: !Ref DefaultEmail
+  BucketPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref HelloWorldFunction
+      Principal: s3.amazonaws.com
+      SourceAccount: !Ref "AWS::AccountId"
+      SourceArn: !Sub "arn:aws:s3:::inbound-email-${AWS::AccountId}-${AWS::Region}"
+
+  EmailBucket:
+    DependsOn: BucketPermission
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "inbound-email-${AWS::AccountId}-${AWS::Region}"
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: prefix
+                    Value: inbound_email/
+
+            Function: !GetAtt HelloWorldFunction.Arn
+
+  PutEmailBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref EmailBucket
+      PolicyDocument:
+        Statement:
+          - Action:
+              - "s3:PutObject"
+            Effect: "Allow"
+            Resource: !Sub "arn:aws:s3:::${EmailBucket}/inbound_email/*"
+            Principal:
+              Service: "ses.amazonaws.com"
+            Condition:
+              StringEquals:
+                aws:Referer: !Sub "${AWS::AccountId}"
+  RuleSet:
+    Type: AWS::SES::ReceiptRuleSet
+    Properties:
+      RuleSetName: SendToS3
+
+  EmailRule:
+    DependsOn: PutEmailBucketPolicy
+    Type: AWS::SES::ReceiptRule
+    Properties:
+      Rule:
+        Actions:
+          - S3Action:
+              BucketName: !Ref EmailBucket
+              ObjectKeyPrefix: inbound_email/
+        Enabled: True
+        ScanEnabled: True
+        TlsPolicy: Require
+      RuleSetName: !Ref RuleSet
+
+  EmailRecordsForRoute53:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      Type: MX
+      TTL: "300"
+      Name: !Sub "${Domain}."
+      HostedZoneName: !Sub "${Domain}."
+      ResourceRecords:
+        - !Sub "10 inbound-smtp.${AWS::Region}.amazonaws.com"
+
+  EmailToAccountId:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        -
+          AttributeName: "EmailAddress"
+          AttributeType: "S"
+      KeySchema:
+        -
+          AttributeName: "EmailAddress"
+          KeyType: "HASH"
+      ProvisionedThroughput:
+        ReadCapacityUnits: "3"
+        WriteCapacityUnits: "1"
