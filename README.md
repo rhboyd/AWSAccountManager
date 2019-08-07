@@ -1,6 +1,6 @@
 # AWS
 
-This is an AWS Accounts Email Organizer. It will help users of AWS Organizations to keep track of which accounts are tied to which accounts.
+This is an AWS Accounts Email Organizer. It will help users of AWS Organizations to keep track of which email addresses are tied to which accounts.
 
 Here's how it works.
 
