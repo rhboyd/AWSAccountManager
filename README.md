@@ -21,4 +21,34 @@ You will need to cut a free support ticket to AWS Support to ask them to un-sand
 
 The current version of this app require that it be deployed in the root so that it can access AWS Organizations to dereference emails to account IDs. If you wanted to maintain the table yourself, you could put this stack in any account you wish.
 
+# Installation
 
+Installation is as a standard AWS SAM project, with 4 environment specific parameters:  
+
+0) Clone the repo, if you haven't already
+
+1) Have a bucket handy
+    Your AWS account should have an S3 bucket, and a Route53 Hosted Zone 
+
+2) Setup your 4 paramaters in environment variables
+    ``` 
+    export BUCKETNAME=<hole_in_the_bucket>
+    export HOSTEDZONEID=<Z123456789A>
+    export DOMAINNAME=<mybiglongdomainname.wtf>
+    export DEFAULTEMAIL=<bigboss@smallco.com>
+    ```
+
+3) From a CLI with correct AWS access:
+    ```
+    sam build
+    sam package --s3-bucket ${BUCKETNAME} --output-template-file output.yaml                     
+    sam deploy --template-file ./output.yaml --stack-name AWS-Account-Manager-Email-Manager --capabilities CAPABILITY_AUTO_EXPAND CAPABILITY_IAM --parameter-overrides "MyHostedZone=${HOSTEDZONEID}" "DefaultEmail=${DEFAULTEMAIL}" "Domain=${DOMAINNAME}"
+    ```
+
+4) Create some accounts using AWS Organizations, and watch the emails flow.
+
+    For a further challenge, try getting AWS Control Tower to create your accounts through Service Catalog & AWS Organizations
+ 
+    _Its been releases GA, so should be fine_ -- said someone
+ 
+    (Hint - change your Accounts email to use your new domainname before you try using Control Tower)
