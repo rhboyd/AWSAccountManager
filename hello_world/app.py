@@ -35,6 +35,9 @@ class AccountDeets(object):
 
 
 def get_account_info(email_address: str) -> AccountDeets:
+    # Ensure we have only the email - not the realname part.
+    _, email_address = email.utils.parseaddr(email_address)
+
     try:
         response = table.get_item(
             Key={
@@ -94,17 +97,23 @@ def lambda_handler(event, context):
         del msg['subject']
         del msg['Source']
         del msg['From']
+        del msg['Return-Path']
 
         msg['subject'] = "[{}]: {}".format(account.account_id, orig_subject)
-        msg['From'] = orig_to
 
-        response = ses_client.send_raw_email(
-            RawMessage=dict(Data=msg.as_string()),
-            Destinations= [
-                account.internal_email_address
-            ],
-            Source = orig_to
-        )
+        try:
+            response = ses_client.send_raw_email(
+                RawMessage=dict(Data=msg.as_string()),
+                Destinations= [
+                    account.internal_email_address
+                ],
+                Source = orig_to
+            )
+        except ClientError as e:
+            print(e.response['Error']['Message'])
+            raise e
+        else:
+            print("Email sent. Message ID: ", response['MessageId'])
 
     return {
         "statusCode": 200,
