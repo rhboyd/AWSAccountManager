@@ -1,11 +1,10 @@
 import json
-import email
 import os
+import email
 from email import policy
-from email.parser import BytesParser, Parser
+from email.parser import Parser
 import boto3
-import re
-import logging
+from botocore.exceptions import ClientError
 
 DEFAULT_EMAIL = os.environ['DEFAULT_EMAIL']
 
@@ -104,10 +103,10 @@ def lambda_handler(event, context):
         try:
             response = ses_client.send_raw_email(
                 RawMessage=dict(Data=msg.as_string()),
-                Destinations= [
+                Destinations=[
                     account.internal_email_address
                 ],
-                Source = orig_to
+                Source=orig_to
             )
         except ClientError as e:
             print(e.response['Error']['Message'])
