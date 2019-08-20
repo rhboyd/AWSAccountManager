@@ -1,10 +1,10 @@
 import json
-import email
 import os
+import email
 from email import policy
-from email.parser import BytesParser, Parser
+from email.parser import Parser
 import boto3
-import re
+from botocore.exceptions import ClientError
 
 DEFAULT_EMAIL = os.environ['DEFAULT_EMAIL']
 
@@ -34,6 +34,9 @@ class AccountDeets(object):
 
 
 def get_account_info(email_address: str) -> AccountDeets:
+    # Ensure we have only the email - not the realname part.
+    _, email_address = email.utils.parseaddr(email_address)
+
     try:
         response = table.get_item(
             Key={
@@ -78,31 +81,38 @@ def lambda_handler(event, context):
         obj = s3.Object(bucket, key)
         raw_contents = obj.get()['Body'].read()
         msg = Parser(policy=policy.default).parsestr(raw_contents.decode('utf-8'))
-        print('To:', msg['to'])
-        print('From:', msg['from'])
-        print('Subject:', msg['subject'])
-        simplest = msg.get_body(preferencelist=('plain', 'html'))
-        body_text = ''.join(simplest.get_content().splitlines(keepends=True))
+
+        orig_to = msg['to']
+        orig_subject = msg['subject']
+
+        print('To: ', msg['to'])
+        print('From: ', msg['from'])
+        print('Subject: ', msg['subject'])
+
         account = get_account_info(msg['to'])
 
-        response = ses_client.send_email(
-            Source=msg['to'],
-            Destination={
-                'ToAddresses': [
+        del msg['DKIM-Signature']
+        del msg['Sender']
+        del msg['subject']
+        del msg['Source']
+        del msg['From']
+        del msg['Return-Path']
+
+        msg['subject'] = "[{}]: {}".format(account.account_id, orig_subject)
+
+        try:
+            response = ses_client.send_raw_email(
+                RawMessage=dict(Data=msg.as_string()),
+                Destinations=[
                     account.internal_email_address
-                ]
-            },
-            Message={
-                'Subject': {
-                    'Data': "{}: {}".format(account.account_id, msg['subject']),
-                    'Charset': 'utf-8'
-                },
-                'Body': {
-                    'Text': {
-                        'Data': body_text,
-                        'Charset': 'utf-8'
-                    }
-                }})
+                ],
+                Source=orig_to
+            )
+        except ClientError as e:
+            print(e.response['Error']['Message'])
+            raise e
+        else:
+            print("Email sent. Message ID: ", response['MessageId'])
 
     return {
         "statusCode": 200,
